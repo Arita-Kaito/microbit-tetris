@@ -4,15 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>micro:bit Sensor Data</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script> <!-- Three.js ライブラリ -->
     <script src="bluejelly.js"></script> <!-- BlueJelly ライブラリの読み込み -->
     
     <style>
-        body { margin: 0; overflow: hidden; }
-        canvas { display: block; }
         #sensorData {
             font-size: 20px;
             margin-top: 20px;
+        }
+        #dataList {
+            font-size: 16px;
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: scroll;
         }
     </style>
 </head>
@@ -27,38 +30,9 @@
         <p><strong>Light Level: </strong><span id="lightData">0</span></p>
     </div>
 
-    <!-- 3Dモデル表示用のキャンバス -->
-    <script>
-        // Three.js 3Dシーンの設定
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-
-        // 立方体の作成
-        const geometry = new THREE.BoxGeometry(2, 2, 2);  // サイズを大きく
-        const materials = [
-            new THREE.MeshBasicMaterial({ color: 0xff0000 }),  // 赤
-            new THREE.MeshBasicMaterial({ color: 0x00ff00 }),  // 緑
-            new THREE.MeshBasicMaterial({ color: 0x0000ff }),  // 青
-            new THREE.MeshBasicMaterial({ color: 0xffff00 }),  // 黄色
-            new THREE.MeshBasicMaterial({ color: 0xff00ff }),  // マゼンタ
-            new THREE.MeshBasicMaterial({ color: 0x00ffff })   // シアン
-        ];
-        const cube = new THREE.Mesh(geometry, materials);
-        scene.add(cube);
-
-        // カメラの配置
-        camera.position.z = 5;
-
-        // アニメーションループ
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
-        }
-        animate();
-    </script>
+    <div id="dataList">
+        <ul id="sensorDataList"></ul>
+    </div>
 
     <script>
         const blueJelly = new BlueJelly();
@@ -99,6 +73,12 @@
                     const decodedString = decoder.decode(value); // UTF-8デコード
                     console.log(decodedString);
 
+                    // リストに追加
+                    //const dataList = document.getElementById('sensorDataList');
+                    //const newListItem = document.createElement('li');
+                    //newListItem.textContent = `${decodedString}`;
+                    //dataList.appendChild(newListItem);
+
                     // データ解析
                     const accMatch = decodedString.match(/a:([\d\-,]+)/);
                     const tempMatch = decodedString.match(/t:(\d+)/);
@@ -107,16 +87,6 @@
                     if (accMatch) {
                         const accData = accMatch[1].split(',');
                         document.getElementById('accData').textContent = `X: ${accData[0]}, Y: ${accData[1]}, Z: ${accData[2]}`;
-
-                        // 受け取った加速度データを使って立方体を傾ける
-                        const accX = parseInt(accData[0], 10);
-                        const accY = parseInt(accData[1], 10);
-                        const accZ = parseInt(accData[2], 10);
-
-                        // 加速度データに基づいて立方体の回転を調整
-                        cube.rotation.x = accX * Math.PI / 1024;  // X軸回転
-                        cube.rotation.y = accY * Math.PI / 1024;  // Y軸回転
-                        cube.rotation.z = accZ * Math.PI / 1024;  // Z軸回転
                     }
 
                     if (tempMatch) {
