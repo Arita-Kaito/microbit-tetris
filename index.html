@@ -3,104 +3,239 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>micro:bit Sensor Data</title>
-    <script src="bluejelly.js"></script> <!-- BlueJelly ライブラリの読み込み -->
-    
+    <title>micro:bit Tetris</title>
+    <script src="bluejelly.js"></script>
     <style>
-        #sensorData {
-            font-size: 20px;
-            margin-top: 20px;
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(0, 0, 0, 1); /* 初期の背景色 */
+            transition: background-color 0.5s;
         }
-        #dataList {
-            font-size: 16px;
+        canvas {
+            display: block;
+            margin: 20px auto;
+            border: 5px solid white; /* 枠線を追加 */
+            border-radius: 10px;
+        }
+        button {
+            font-size: 18px;
+            padding: 10px 20px;
             margin-top: 20px;
-            max-height: 200px;
-            overflow-y: scroll;
         }
     </style>
 </head>
 <body>
-    <h1>micro:bit Sensor Data</h1>
-
-    <button id="startButton">Start Bluetooth</button>
-
-    <div id="sensorData">
-        <p><strong>Accelerometer (X, Y, Z): </strong><span id="accData">0, 0, 0</span></p>
-        <p><strong>Temperature: </strong><span id="tempData">0</span></p>
-        <p><strong>Light Level: </strong><span id="lightData">0</span></p>
-    </div>
-
-    <div id="dataList">
-        <ul id="sensorDataList"></ul>
-    </div>
+    <button id="connectButton">Connect to micro:bit</button>
+    <canvas id="gameCanvas" width="300" height="600"></canvas>
 
     <script>
         const blueJelly = new BlueJelly();
-
-        // UUIDの設定（UARTサービスを利用）
         const serviceUUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e'; // UART Service
         const characteristicUUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // TX Characteristic
 
         let characteristic;
+        let gameStarted = false;
+        let currentBlock;
+        let board = Array.from({ length: 20 }, () => Array(10).fill(0)); // 横10列
+        let fallSpeed = 1000; // ms
+        let lastFallTime = Date.now();
+        let lastRotationTime = 0; // 回転のクールダウン管理
+        const rotationCooldown = 1000; // 回転のクールダウン時間 (ms)
+        let brightness = 1; // 背景の明るさ
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
 
-        // ボタンが押されたときにBluetoothデバイスを接続
-        document.getElementById('startButton').addEventListener('click', async () => {
+        // ブロックの形状パターン（7種類）
+        const blockShapes = [
+            [[1, 1], [1, 1]], // 正方形
+            [[0, 1, 0], [1, 1, 1]], // T字
+            [[1, 1, 0], [0, 1, 1]], // Z字
+            [[0, 1, 1], [1, 1, 0]], // 逆Z字
+            [[1, 0], [1, 0], [1, 1]], // L字
+            [[0, 0, 1], [1, 1, 1]], // 逆L字
+            [[1, 1, 1, 1]], // 長方形
+        ];
+
+        let bButtonPressed = false; // Bボタンの状態
+        let lastBPressTime = 0; // 最後にBボタンが押された時間
+
+        document.getElementById('connectButton').addEventListener('click', async () => {
             try {
-                // デバイスをスキャンして接続
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: 'BBC micro:bit' }], // 名前が "BBC micro:bit" を含むデバイスに限定
+                    filters: [{ namePrefix: 'BBC micro:bit' }],
                     optionalServices: [serviceUUID]
                 });
-                console.log('Device selected:', device);
-
                 const server = await device.gatt.connect();
-                console.log('Connected to GATT server');
-
                 const service = await server.getPrimaryService(serviceUUID);
-                console.log('Service found');
-
                 characteristic = await service.getCharacteristic(characteristicUUID);
-                console.log('Characteristic found');
 
-                // 通知の開始
                 await characteristic.startNotifications();
-                console.log('Notifications started');
+                characteristic.addEventListener('characteristicvaluechanged', handleSensorData);
 
-                // データ受信時のイベントリスナーを設定
-                characteristic.addEventListener('characteristicvaluechanged', event => {
-                    const value = event.target.value; // DataView
-                    const decoder = new TextDecoder('utf-8');
-                    const decodedString = decoder.decode(value); // UTF-8デコード
-                    console.log(decodedString);
-
-                    // リストに追加
-                    //const dataList = document.getElementById('sensorDataList');
-                    //const newListItem = document.createElement('li');
-                    //newListItem.textContent = `${decodedString}`;
-                    //dataList.appendChild(newListItem);
-
-                    // データ解析
-                    const accMatch = decodedString.match(/a:([\d\-,]+)/);
-                    const tempMatch = decodedString.match(/t:(\d+)/);
-                    const lightMatch = decodedString.match(/l:(\d+)/);
-
-                    if (accMatch) {
-                        const accData = accMatch[1].split(',');
-                        document.getElementById('accData').textContent = `X: ${accData[0]}, Y: ${accData[1]}, Z: ${accData[2]}`;
-                    }
-
-                    if (tempMatch) {
-                        document.getElementById('tempData').textContent = tempMatch[1];
-                    }
-
-                    if (lightMatch) {
-                        document.getElementById('lightData').textContent = lightMatch[1];
-                    }
-                });
+                document.getElementById('connectButton').style.display = 'none'; // 接続ボタンを非表示
+                gameStarted = true; // ゲームを開始
+                startGame();
             } catch (error) {
                 console.error('Connection Error:', error);
             }
         });
+
+        function handleSensorData(event) {
+            const value = event.target.value;
+            const decoder = new TextDecoder('utf-8');
+            const decodedString = decoder.decode(value);
+
+            const accMatch = decodedString.match(/a:([\d\-,]+)/);
+            const tempMatch = decodedString.match(/t:(\d+)/);
+            const lightMatch = decodedString.match(/l:(\d+)/);
+            const buttonBMatch = decodedString.match(/b:(\d+)/); // Bボタンの入力
+
+            // 加速度センサーのデータ
+            if (accMatch) {
+                const accData = accMatch[1].split(',');
+                const tiltX = parseInt(accData[0]) / 2; // 感度調整
+                const tiltY = parseInt(accData[1]) / 2; // 感度調整
+
+                if (tiltX > 100 && canMove(currentBlock, 1, 0)) currentBlock.x++; // 右移動
+                if (tiltX < -100 && canMove(currentBlock, -1, 0)) currentBlock.x--; // 左移動
+
+                // 手前に傾けた際の回転
+                const now = Date.now();
+                if (tiltY > 200 && now - lastRotationTime > rotationCooldown) {
+                    rotateBlock(currentBlock);
+                    lastRotationTime = now; // 回転時間を更新
+                }
+            }
+
+            // 温度センサーで落下速度調整
+            if (tempMatch) {
+                const temperature = parseInt(tempMatch[1]);
+                fallSpeed = Math.max(200, 1000 - (temperature - 20) * 50); // 温度で落下速度調整
+            }
+
+            // 明るさ調整
+            if (lightMatch) {
+                const lightLevel = parseInt(lightMatch[1]);
+                brightness = Math.min(1, lightLevel / 255); // 明るさを計算
+                document.body.style.backgroundColor = `rgba(0, 0, 0, ${1 - brightness})`; // 背景色に適用
+            }
+
+            // Bボタンが押された時の処理
+            if (buttonBMatch && buttonBMatch[1] === "1") {
+                const now = Date.now();
+                if (!bButtonPressed || now - lastBPressTime > 1000) { // 1秒間のクールダウン
+                    bButtonPressed = true;
+                    lastBPressTime = now;
+                    dropBlockImmediately();
+                }
+            } else {
+                bButtonPressed = false; // ボタンが離された場合はリセット
+            }
+        }
+
+        function rotateBlock(block) {
+            const newShape = block.shape[0].map((_, index) =>
+                block.shape.map(row => row[index]).reverse()
+            );
+            if (canMove({ ...block, shape: newShape }, 0, 0)) block.shape = newShape; // 衝突がない場合のみ回転
+        }
+
+        function dropBlockImmediately() {
+            while (canMove(currentBlock, 0, 1)) {
+                currentBlock.y++;
+            }
+            fixBlockToBoard(currentBlock);
+            clearLines();
+            currentBlock = generateBlock();
+        }
+
+        function canMove(block, dx, dy) {
+            return block.shape.every((row, y) =>
+                row.every((value, x) => {
+                    if (!value) return true; // 空白部分は無視
+                    const newX = block.x + x + dx;
+                    const newY = block.y + y + dy;
+                    return newX >= 0 && newX < 10 && newY < 20 && board[newY]?.[newX] === 0;
+                })
+            );
+        }
+
+        function fixBlockToBoard(block) {
+            block.shape.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value) board[block.y + y][block.x + x] = value;
+                });
+            });
+        }
+
+        function clearLines() {
+            board = board.filter(row => row.some(cell => cell === 0)); // 空白の行のみ残す
+            while (board.length < 20) board.unshift(Array(10).fill(0)); // 上に空白行を追加
+        }
+
+        function generateBlock() {
+            const shape = blockShapes[Math.floor(Math.random() * blockShapes.length)];
+            return { x: Math.floor((10 - shape[0].length) / 2), y: 0, shape }; // 初期位置調整
+        }
+
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let y = 0; y < 20; y++) {
+                for (let x = 0; x < 10; x++) {
+                    if (board[y][x]) {
+                        ctx.fillStyle = "blue";
+                        ctx.fillRect(x * 30, y * 30, 30, 30);
+                    }
+                }
+            }
+        }
+
+        function drawBlock(block) {
+            ctx.fillStyle = "red";
+            block.shape.forEach((row, dy) => {
+                row.forEach((value, dx) => {
+                    if (value) {
+                        ctx.fillRect((block.x + dx) * 30, (block.y + dy) * 30, 30, 30);
+                    }
+                });
+            });
+        }
+
+        function updateGame() {
+            if (!gameStarted) return;
+
+            // ゲームオーバーチェック
+            if (board[0].some(cell => cell !== 0)) {
+                alert("Game Over!");
+                gameStarted = false;
+                return;
+            }
+
+            const now = Date.now();
+            if (now - lastFallTime > fallSpeed) {
+                if (canMove(currentBlock, 0, 1)) {
+                    currentBlock.y++;
+                } else {
+                    fixBlockToBoard(currentBlock);
+                    clearLines();
+                    currentBlock = generateBlock();
+                }
+                lastFallTime = now;
+            }
+
+            drawBoard();
+            drawBlock(currentBlock);
+            requestAnimationFrame(updateGame);
+        }
+
+        function startGame() {
+            currentBlock = generateBlock();
+            updateGame();
+        }
     </script>
 </body>
 </html>
