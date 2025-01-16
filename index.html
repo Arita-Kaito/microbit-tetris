@@ -114,7 +114,7 @@
             // 温度センサーで落下速度調整
             if (tempMatch) {
                 const temperature = parseInt(tempMatch[1]);
-                fallSpeed = Math.max(200, 1000 - (temperature - 20) * 50); // 温度で落下速度調整
+                fallSpeed = Math.max(200, 1000 - (temperature - 20) * 250); // 温度で落下速度調整
             }
 
             // 明るさ調整
